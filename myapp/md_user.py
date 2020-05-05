@@ -1,3 +1,6 @@
+import datetime
+
+import cv2
 from django.shortcuts import render,redirect
 #导包
 from django.http import HttpResponse,HttpResponseRedirect,JsonResponse
@@ -60,6 +63,120 @@ port = 6379
 
 #建立链接
 r = redis.Redis(host=host,port=port)
+
+
+# 图片加水印压缩
+def pic_logo(imgname):
+    # 打开图片重新读图操作，为下面加水印做准备
+    img = Image.open('./static/upload/' + imgname)
+    # 定义字体            指定字体或按照宽高的百分比显示字体大小
+    font = ImageFont.truetype(font='C:\\Windows\\Fonts\\msjhbd.ttc', size=20)
+    # 生成画笔
+    draw = ImageDraw.Draw(img)
+    # 绘制     坐标  名字     颜色 字体
+    draw.text((1150, 900), 'django2.0.4', fill=(76, 234, 124, 180), font=font)
+    # 保存路径存储图片
+    img.save('./static/upload/' + imgname)
+    print(imgname)
+    #压缩图片
+    img = cv2.imread('./static/upload/'+imgname)
+    #压缩 png压缩等级 0-9
+    cv2.imwrite('./static/upload/'+imgname,img,[cv2.IMWRITE_PNG_COMPRESSION,50])
+
+#七牛云token
+from qiniu import Auth
+
+class QiNiu(APIView):
+
+	def get(self,request):
+
+		#声明认证对象
+		q = Auth('1zVN6KbCtZpRCDgm2hjVs4ftPIYT1IqTZTZ2jErd'
+                 ,'FBxaDPJQRDv5-hXiKgH9ROR9JQDfEBX1lluwsTFR')
+
+		#获取token
+		token = q.upload_token('md-shop')
+
+		return Response({'token':token})
+
+
+
+#文件上传通用类
+class UploadFile(APIView):
+
+	def post(self,request):
+
+		#接收参数
+		myfile = request.FILES.get('file')
+
+		uid = request.POST.get("uid",None)
+
+		#建立文件流对象
+		f = open(os.path.join(UPLOAD_ROOT,'',myfile.name.replace('"','')),'wb')
+		#写入
+		for chunk in myfile.chunks():
+			f.write(chunk)
+		f.close()
+
+		#修改头像地址
+		user = User.objects.get(id=int(uid))
+		user.img = myfile.name.replace('"','')
+		user.save()
+
+		return Response({'filename':myfile.name.replace('"','')})
+
+# 新浪微博回调方法
+def wb_back(request):
+    # 接收参数
+    code = request.GET.get('code', None)
+
+    # 定义token接口地址
+    url = "https://api.weibo.com/oauth2/access_token"
+
+    # 定义参数
+    re = requests.post(url, data={
+        "client_id": "45086987",
+        "client_secret": "bda5375d096707fe4ab74d6e749d8d4c",
+        "grant_type": "authorization_code",
+        "code": code,
+        "redirect_uri": "http://127.0.0.1:8000/md_admin/weibo"
+    })
+
+    print(re.json())
+
+    # 换取新浪微博用户昵称
+    res = requests.get('https://api.weibo.com/2/users/show.json',
+                       params={'access_token': re.json()['access_token'], 'uid': re.json()['uid']})
+
+    print(res.json())
+
+    sina_id = ''
+    user_id = ''
+
+    # 判断是否用新浪微博登录过
+    user = User.objects.filter(username=str(res.json()['name'])).first()
+
+    if user:
+        # 代表曾经用该账号登录过
+        sina_id = user.username
+        user_id = user.id
+    else:
+        # 首次登录，入库新浪微博账号
+        user = User(username=str(res.json()['name']), password='')
+        user.save()
+        user = User.objects.filter(username=str(res.json()['name'])).first()
+        sina_id = user.username
+        user_id = user.id
+
+    print(sina_id, user_id)
+
+    # 重定向
+    return redirect("http://localhost:8080?sina_id=" + str(sina_id) + "&uid=" + str(user_id))
+    # return HttpResponse("回调成功")
+
+
+
+
 
 #  自定义图片验证码
 class MyCode(View):
